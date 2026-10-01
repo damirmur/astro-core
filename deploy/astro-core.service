@@ -1,0 +1,22 @@
+# astro-core.service — прод-юнит расчётника (:8084).
+# Установка (нужен root):
+#   sudo cp deploy/astro-core.service /etc/systemd/system/astro-core.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now astro-core.service
+# Проверка: curl http://127.0.0.1:8084/healthz
+[Unit]
+Description=astro-core: CGO astro calculations (astro3d.ru)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dmyr
+WorkingDirectory=/var/www/astro3d.ru
+EnvironmentFile=/home/dmyr/astro-core/astro.env
+ExecStart=/home/dmyr/astro-core/astro-core
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
