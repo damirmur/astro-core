@@ -31,6 +31,10 @@ func main() {
 	mux.HandleFunc("/api/v1/calendar", corsMiddleware(handleCalendar))
 	mux.HandleFunc("/api/daily", corsMiddleware(handleDailyFile))
 	mux.HandleFunc("/api/translate", corsMiddleware(handleTranslate))
+	mux.HandleFunc("/api/v1/geo", corsMiddleware(handleGeo))
+
+	// Фоновый daily_calendar из tasks.json (пишет html/data/daily.json).
+	go startTaskRunner()
 
 	addr := Port
 	if v := os.Getenv("ASTRO_PORT"); v != "" {
