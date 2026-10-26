@@ -278,6 +278,99 @@ func resolveGeoAndTime(city string, dateStr string, timeStr string) (*interactiv
 	return gd, utcTime, nil
 }
 
+// --- Ответ без домов (космограмма, ?houses=none) ---------------------------
+//
+// Космограмма — карта с неизвестным временем рождения: дома, Asc и MC
+// не рассчитываются и не отдаются вовсе (никаких "cusps": null и номеров
+// домов у транзитов). Планеты и аспекты не меняются: система домов на них
+// не влияет.
+
+type natalDataNoHouses struct {
+	Planets []astro.PlanetPoint `json:"planets"`
+	Aspects []astro.Aspect      `json:"aspects,omitempty"`
+}
+
+type synastryDataNoHouses struct {
+	Chart1  natalDataNoHouses `json:"chart1"`
+	Chart2  natalDataNoHouses `json:"chart2"`
+	Aspects []astro.Aspect    `json:"aspects"`
+}
+
+type transitPointNoHouses struct {
+	Longitude float64
+	Speed     float64
+}
+
+// MarshalJSON — компактная форма [longitude, speed] без номера дома.
+func (p transitPointNoHouses) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]float64{p.Longitude, p.Speed})
+}
+
+type transitSeriesNoHouses struct {
+	Date    []string                          `json:"date"`
+	Planets map[string][]transitPointNoHouses `json:"planets"`
+}
+
+type natalPeriodDataNoHouses struct {
+	Natal    natalDataNoHouses          `json:"natal"`
+	Transits transitSeriesNoHouses      `json:"transits"`
+	Aspects  []astro.TransitAspectEvent `json:"aspects"`
+}
+
+// parseHousesMode — режим ответа по домам: пусто/full — обычный, none —
+// космограмма. Неизвестное значение — ошибка (а не тихая подмена).
+func parseHousesMode(q url.Values) (bool, error) {
+	switch v := strings.TrimSpace(q.Get("houses")); v {
+	case "", "full":
+		return false, nil
+	case "none":
+		return true, nil
+	default:
+		return false, fmt.Errorf("parameter 'houses' accepts only 'none' (got %q)", v)
+	}
+}
+
+// natalPayload — data натала: обычная карта либо без домов.
+func natalPayload(res *astro.AstroResult, housesNone bool) any {
+	d := astro.ToNatalData(res)
+	if housesNone {
+		return natalDataNoHouses{Planets: d.Planets, Aspects: d.Aspects}
+	}
+	return d
+}
+
+// synastryPayload — data синастрии: обычные карты либо без домов.
+func synastryPayload(res *astro.AstroResult, housesNone bool) any {
+	d := astro.ToSynastryData(res)
+	if !housesNone {
+		return d
+	}
+	return synastryDataNoHouses{
+		Chart1:  natalDataNoHouses{Planets: d.Chart1.Planets, Aspects: d.Chart1.Aspects},
+		Chart2:  natalDataNoHouses{Planets: d.Chart2.Planets, Aspects: d.Chart2.Aspects},
+		Aspects: d.Aspects,
+	}
+}
+
+// natalPeriodWithoutHouses — тот же ответ natal-period, но без куспидов
+// натала и без номера дома в рядах транзитов.
+func natalPeriodWithoutHouses(res *astro.NatalPeriodData) natalPeriodDataNoHouses {
+	out := natalPeriodDataNoHouses{
+		Natal:   natalDataNoHouses{Planets: res.Natal.Planets, Aspects: res.Natal.Aspects},
+		Aspects: res.Aspects,
+	}
+	out.Transits.Date = res.Transits.Date
+	out.Transits.Planets = make(map[string][]transitPointNoHouses, len(res.Transits.Planets))
+	for id, pts := range res.Transits.Planets {
+		list := make([]transitPointNoHouses, 0, len(pts))
+		for _, p := range pts {
+			list = append(list, transitPointNoHouses{Longitude: p.Longitude, Speed: p.Speed})
+		}
+		out.Transits.Planets[id] = list
+	}
+	return out
+}
+
 // 1. Обработчик /api/v1/natal
 func handleNatal(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -305,6 +398,11 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 	}
 	if hsys == "" {
 		hsys = "P"
+	}
+	housesNone, hErr := parseHousesMode(q)
+	if hErr != nil {
+		http.Error(w, fmt.Sprintf(`{"error": %q}`, hErr.Error()), http.StatusBadRequest)
+		return
 	}
 
 	// Кэширование
@@ -373,7 +471,7 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 		Timezone:  gd.Timezone,
 		UTCOffset: gd.UTCOffset,
 	}
-	envelope := astro.NewEnvelope(astro.NatalSchema, astro.NewNatalMeta(), geo, astro.ToNatalData(res))
+	envelope := astro.NewEnvelope(astro.NatalSchema, astro.NewNatalMeta(), geo, natalPayload(res, housesNone))
 
 	jsonBytes, _ := json.Marshal(envelope)
 	cache.Set(cacheKey, jsonBytes, CacheDuration)
@@ -427,6 +525,11 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 	}
 	if hsys == "" {
 		hsys = "P"
+	}
+	housesNone, hErr := parseHousesMode(q)
+	if hErr != nil {
+		http.Error(w, fmt.Sprintf(`{"error": %q}`, hErr.Error()), http.StatusBadRequest)
+		return
 	}
 
 	cacheKey := generateCacheKey("synastry", q)
@@ -501,7 +604,7 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 			UTCOffset: gd2.UTCOffset,
 		},
 	}
-	envelope := astro.NewEnvelope(astro.SynastrySchema, astro.NewSynastryMeta(), geo, astro.ToSynastryData(res))
+	envelope := astro.NewEnvelope(astro.SynastrySchema, astro.NewSynastryMeta(), geo, synastryPayload(res, housesNone))
 
 	jsonBytes, _ := json.Marshal(envelope)
 	cache.Set(cacheKey, jsonBytes, CacheDuration)
@@ -638,6 +741,11 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 	if hsys == "" {
 		hsys = "P"
 	}
+	housesNone, hErr := parseHousesMode(q)
+	if hErr != nil {
+		http.Error(w, fmt.Sprintf(`{"error": %q}`, hErr.Error()), http.StatusBadRequest)
+		return
+	}
 	if date == "" {
 		date = q.Get("date")
 		if strings.Contains(date, " ") {
@@ -773,7 +881,11 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	envelope := astro.NewEnvelope(astro.NatalPeriodSchema, astro.NewNatalPeriodMeta(), geo, res)
+	payload := any(res)
+	if housesNone {
+		payload = natalPeriodWithoutHouses(res)
+	}
+	envelope := astro.NewEnvelope(astro.NatalPeriodSchema, astro.NewNatalPeriodMeta(), geo, payload)
 
 	jsonBytes, _ := json.Marshal(envelope)
 	cache.Set(cacheKey, jsonBytes, CacheDuration)
