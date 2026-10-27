@@ -1,2 +1,17 @@
 /.env
 *.log
+# собранные бинарники и артефакты сборки — в git не коммитим
+*.exe
+*.dll
+*.so
+*.so.*
+*.dylib
+*.a
+*.o
+*.obj
+*.test
+*.bin
+*.zip
+*.bak-20*
+/astro-core
+/astro-core.bak-*
