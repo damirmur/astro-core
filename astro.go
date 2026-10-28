@@ -1170,14 +1170,19 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 			Date: time.Now().Format("2006-01-02"),
 			Time: "00:00",
 		})
-		if err == nil {
-			l, lerr := time.LoadLocation(gd.Timezone)
-			if lerr == nil {
-				loc = l
-			} else {
-				offsetSeconds := int(gd.UTCOffset * 3600)
-				loc = time.FixedZone(gd.Timezone, offsetSeconds)
-			}
+		if err != nil {
+			// Без геоданных ответ строить не из чего: раньше здесь была паника
+			// (nil deref на gd.City), net/http рвал соединение и клиент получал EOF.
+			// Отвечаем так же, как остальные расчётные хендлеры.
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve geo/time: %v"}`, err), http.StatusBadRequest)
+			return
+		}
+		l, lerr := time.LoadLocation(gd.Timezone)
+		if lerr == nil {
+			loc = l
+		} else {
+			offsetSeconds := int(gd.UTCOffset * 3600)
+			loc = time.FixedZone(gd.Timezone, offsetSeconds)
 		}
 	} else {
 		gd = &interactive.GeoData{
