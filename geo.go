@@ -17,18 +17,18 @@ import (
 // Без города — 400; город не распознан — 404.
 func handleGeo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Метод не поддерживается")
 		return
 	}
 	city := strings.TrimSpace(r.URL.Query().Get("city"))
 	if city == "" {
-		http.Error(w, "Нет города (query city)", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Не указан город (query city)")
 		return
 	}
 	gd, err := interactive.GetGeoData(&interactive.UserInput{City: city})
 	if err != nil || gd == nil {
 		log.Printf("astro: geo %q не распознан: %v", city, err)
-		http.Error(w, "Город не распознан", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Город не распознан")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

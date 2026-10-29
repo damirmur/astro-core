@@ -390,7 +390,7 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if date == "" {
-		http.Error(w, `{"error": "Parameter 'date' (YYYY-MM-DD) is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameter 'date' (YYYY-MM-DD) is required")
 		return
 	}
 	if timeVal == "" {
@@ -401,7 +401,7 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 	}
 	housesNone, hErr := parseHousesMode(q)
 	if hErr != nil {
-		http.Error(w, fmt.Sprintf(`{"error": %q}`, hErr.Error()), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, hErr.Error())
 		return
 	}
 
@@ -429,7 +429,7 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 		lonF, _ := strconv.ParseFloat(lonVal, 64)
 		utcTime, err = time.Parse("2006-01-02 15:04", date+" "+timeVal)
 		if err != nil {
-			http.Error(w, `{"error": "Invalid date/time format. Expected YYYY-MM-DD HH:MM"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid date/time format. Expected YYYY-MM-DD HH:MM")
 			return
 		}
 		gd = &interactive.GeoData{
@@ -443,7 +443,7 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 		// Новый формат: по названию города
 		gd, utcTime, err = resolveGeoAndTime(city, date, timeVal)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve geo/time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve geo/time: %v", err))
 			return
 		}
 	}
@@ -455,7 +455,7 @@ func handleNatal(w http.ResponseWriter, r *http.Request) {
 
 	res, err := calc.ComputeNatal(r.Context(), utcTime, gd.Latitude, gd.Longitude, hsys)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Calculation error: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Calculation error: %v", err))
 		return
 	}
 
@@ -514,7 +514,7 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if date1 == "" || date2 == "" {
-		http.Error(w, `{"error": "Parameters 'date1' and 'date2' are required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameters 'date1' and 'date2' are required")
 		return
 	}
 	if time1 == "" {
@@ -528,7 +528,7 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 	}
 	housesNone, hErr := parseHousesMode(q)
 	if hErr != nil {
-		http.Error(w, fmt.Sprintf(`{"error": %q}`, hErr.Error()), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, hErr.Error())
 		return
 	}
 
@@ -551,8 +551,16 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 	if latVal != "" && lonVal != "" {
 		latF, _ := strconv.ParseFloat(latVal, 64)
 		lonF, _ := strconv.ParseFloat(lonVal, 64)
-		utcTime1, _ = time.Parse("2006-01-02 15:04", date1+" "+time1)
-		utcTime2, _ = time.Parse("2006-01-02 15:04", date2+" "+time2)
+		utcTime1, err = time.Parse("2006-01-02 15:04", date1+" "+time1)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "Неверная дата/время первой карты (ожидается YYYY-MM-DD HH:MM): "+date1+" "+time1)
+			return
+		}
+		utcTime2, err = time.Parse("2006-01-02 15:04", date2+" "+time2)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "Неверная дата/время второй карты (ожидается YYYY-MM-DD HH:MM): "+date2+" "+time2)
+			return
+		}
 		gd1 = &interactive.GeoData{
 			City:      "Coordinates Mode",
 			Latitude:  latF,
@@ -564,12 +572,12 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 	} else {
 		gd1, utcTime1, err = resolveGeoAndTime(city1, date1, time1)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve city1: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve city1: %v", err))
 			return
 		}
 		gd2, utcTime2, err = resolveGeoAndTime(city2, date2, time2)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve city2: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve city2: %v", err))
 			return
 		}
 	}
@@ -580,7 +588,7 @@ func handleSynastry(w http.ResponseWriter, r *http.Request) {
 
 	res, err := calc.ComputeSynastry(r.Context(), utcTime1, utcTime2, gd1.Latitude, gd1.Longitude, hsys)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Calculation error: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Calculation error: %v", err))
 		return
 	}
 
@@ -624,7 +632,7 @@ func handlePeriod(w http.ResponseWriter, r *http.Request) {
 	city := q.Get("city")
 
 	if start == "" || end == "" {
-		http.Error(w, `{"error": "Parameters 'start' and 'end' (YYYY-MM-DD HH:MM) are required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameters 'start' and 'end' (YYYY-MM-DD HH:MM) are required")
 		return
 	}
 
@@ -651,7 +659,7 @@ func handlePeriod(w http.ResponseWriter, r *http.Request) {
 		}
 		gd, tStart, err = resolveGeoAndTime(city, partsS[0], partsS[1])
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve city start time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve city start time: %v", err))
 			return
 		}
 
@@ -663,12 +671,24 @@ func handlePeriod(w http.ResponseWriter, r *http.Request) {
 		}
 		_, tEnd, err = resolveGeoAndTime(city, partsE[0], partsE[1])
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve city end time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve city end time: %v", err))
 			return
 		}
 	} else {
-		tStart, _ = time.Parse("2006-01-02 15:04", start)
-		tEnd, _ = time.Parse("2006-01-02 15:04", end)
+		tStart, err = time.Parse("2006-01-02 15:04", start)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Неверный параметр 'start' (ожидается YYYY-MM-DD HH:MM): %q", start))
+			return
+		}
+		tEnd, err = time.Parse("2006-01-02 15:04", end)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Неверный параметр 'end' (ожидается YYYY-MM-DD HH:MM): %q", end))
+			return
+		}
+		if !tStart.Before(tEnd) {
+			writeJSONError(w, http.StatusBadRequest, "'start' должен быть раньше 'end'")
+			return
+		}
 		gd = &interactive.GeoData{
 			City:      "UTC Mode",
 			Latitude:  55.7558,
@@ -691,7 +711,7 @@ func handlePeriod(w http.ResponseWriter, r *http.Request) {
 
 	res, err := calc.ComputePeriod(r.Context(), tStart, tEnd, stepHours)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Calculation error: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Calculation error: %v", err))
 		return
 	}
 
@@ -743,7 +763,7 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 	}
 	housesNone, hErr := parseHousesMode(q)
 	if hErr != nil {
-		http.Error(w, fmt.Sprintf(`{"error": %q}`, hErr.Error()), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, hErr.Error())
 		return
 	}
 	if date == "" {
@@ -755,7 +775,7 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if date == "" {
-		http.Error(w, `{"error": "Parameter 'date' (YYYY-MM-DD) is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameter 'date' (YYYY-MM-DD) is required")
 		return
 	}
 
@@ -779,7 +799,7 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 		lonF, _ := strconv.ParseFloat(lonVal, 64)
 		utcTime, err = time.Parse("2006-01-02 15:04", date+" "+timeVal)
 		if err != nil {
-			http.Error(w, `{"error": "Invalid date/time format. Expected YYYY-MM-DD HH:MM"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid date/time format. Expected YYYY-MM-DD HH:MM")
 			return
 		}
 		gd = &interactive.GeoData{
@@ -792,7 +812,7 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 	} else {
 		gd, utcTime, err = resolveGeoAndTime(q.Get("city"), date, timeVal)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve geo/time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve geo/time: %v", err))
 			return
 		}
 	}
@@ -820,7 +840,7 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 	if startStr != "" {
 		ts, te, e := parsePeriodRange(startStr, endStr, city)
 		if e != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to parse period: %v"}`, e), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse period: %v", e))
 			return
 		}
 		startUTC = ts
@@ -860,7 +880,7 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 	res, err := calc.ComputeNatalPeriod(r.Context(), utcTime, gd.Latitude, gd.Longitude, hsys,
 		startUTC, endUTC, step, transitIDs, maxOrb, angles, loc)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Calculation error: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Calculation error: %v", err))
 		return
 	}
 
@@ -912,12 +932,12 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 		hsys = "P"
 	}
 	if date == "" {
-		http.Error(w, `{"error": "Parameter 'date' (YYYY-MM-DD) is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameter 'date' (YYYY-MM-DD) is required")
 		return
 	}
 	refDate := q.Get("ref_date")
 	if refDate == "" {
-		http.Error(w, `{"error": "Parameter 'ref_date' (YYYY-MM-DD) is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameter 'ref_date' (YYYY-MM-DD) is required")
 		return
 	}
 	refTime := q.Get("ref_time")
@@ -945,7 +965,7 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 		lonF, _ := strconv.ParseFloat(lonVal, 64)
 		natalUTC, err = time.Parse("2006-01-02 15:04", date+" "+timeVal)
 		if err != nil {
-			http.Error(w, `{"error": "Invalid date/time format. Expected YYYY-MM-DD HH:MM"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid date/time format. Expected YYYY-MM-DD HH:MM")
 			return
 		}
 		gd = &interactive.GeoData{
@@ -958,7 +978,7 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 	} else {
 		gd, natalUTC, err = resolveGeoAndTime(city, date, timeVal)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve geo/time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve geo/time: %v", err))
 			return
 		}
 	}
@@ -977,7 +997,7 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 		lonF, _ := strconv.ParseFloat(refLonVal, 64)
 		refUTC, err = time.Parse("2006-01-02 15:04", refDate+" "+refTime)
 		if err != nil {
-			http.Error(w, `{"error": "Invalid ref_date/ref_time format. Expected YYYY-MM-DD HH:MM"}`, http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "Invalid ref_date/ref_time format. Expected YYYY-MM-DD HH:MM")
 			return
 		}
 		rgd = &interactive.GeoData{
@@ -990,7 +1010,7 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rgd, refUTC, err = resolveGeoAndTime(refCity, refDate, refTime)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve ref geo/time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve ref geo/time: %v", err))
 			return
 		}
 	}
@@ -1008,7 +1028,7 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 
 	res, err := calc.ComputeReturns(natalUTC, refUTC)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Calculation error: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Calculation error: %v", err))
 		return
 	}
 
@@ -1130,16 +1150,22 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 	year := time.Now().Year()
 	if yearStr != "" {
-		if y, err := strconv.Atoi(yearStr); err == nil {
-			year = y
+		y, err := strconv.Atoi(yearStr)
+		if err != nil || y < 1 || y > 9999 {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Неверный параметр 'year' (ожидается год числом, например 2026): %q", yearStr))
+			return
 		}
+		year = y
 	}
 
 	month := 0
 	if monthStr != "" {
-		if m, err := strconv.Atoi(monthStr); err == nil && m >= 0 && m <= 12 {
-			month = m
+		m, err := strconv.Atoi(monthStr)
+		if err != nil || m < 0 || m > 12 {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Неверный параметр 'month' (0 — весь год, 1–12 — месяц): %q", monthStr))
+			return
 		}
+		month = m
 	}
 
 	signStr := q.Get("sign")
@@ -1174,7 +1200,7 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 			// Без геоданных ответ строить не из чего: раньше здесь была паника
 			// (nil deref на gd.City), net/http рвал соединение и клиент получал EOF.
 			// Отвечаем так же, как остальные расчётные хендлеры.
-			http.Error(w, fmt.Sprintf(`{"error": "Failed to resolve geo/time: %v"}`, err), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to resolve geo/time: %v", err))
 			return
 		}
 		l, lerr := time.LoadLocation(gd.Timezone)
@@ -1227,7 +1253,7 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 	res, err := calc.ComputeCalendar(r.Context(), calcStart, calcEnd, loc)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Calculation error: %v"}`, err), http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Calculation error: %v", err))
 		return
 	}
 
@@ -1291,7 +1317,7 @@ func handleTranslate(w http.ResponseWriter, r *http.Request) {
 	sl := q.Get("sl")
 
 	if text == "" {
-		http.Error(w, `{"error": "Parameter 'q' (text) is required"}`, http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Parameter 'q' (text) is required")
 		return
 	}
 	if tl == "" {
@@ -1317,23 +1343,23 @@ func handleTranslate(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(googleURL)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "Translate service error: %v"}`, err), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Translate service error: %v", err))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		http.Error(w, fmt.Sprintf(`{"error": "Translate service returned status %d"}`, resp.StatusCode), http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Translate service returned status %d", resp.StatusCode))
 		return
 	}
 
 	var raw []interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		http.Error(w, `{"error": "Invalid response from translate service"}`, http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "Invalid response from translate service")
 		return
 	}
 	if len(raw) == 0 {
-		http.Error(w, `{"error": "Empty response from translate service"}`, http.StatusBadGateway)
+		writeJSONError(w, http.StatusBadGateway, "Empty response from translate service")
 		return
 	}
 
