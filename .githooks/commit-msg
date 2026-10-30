@@ -61,9 +61,8 @@ if [ -z "$TOKEN" ]; then
 	exit 0
 fi
 
-flt="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote("id=\""+sys.argv[1]+"\""))' "$id" 2>/dev/null)"
 resp="$(curl -sS --max-time 8 -w '\n%{http_code}' -H "Authorization: Bearer $TOKEN" \
-	"$API/api/dev/tasks?perPage=1&filter=$flt" 2>/dev/null)" || {
+	"$API/api/dev/tasks?perPage=1&id=$id" 2>/dev/null)" || {
 	echo "commit-msg: доска недоступна — задача $id не проверена" >&2
 	exit 0
 }
