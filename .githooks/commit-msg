@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# commit-msg — коммит без строки «DevTask: <id>» отклоняется.
+#
+# Правило проекта: каждая работа по проекту зарегистрирована на доске
+# (/dev.html, PB bl_dev_tasks). В сообщении коммита — одна из строк:
+#
+#   DevTask: kw3m9x2ab7qzt1p        задача существует и в работе (или уже закрыта)
+#   DevTask: none — <причина>       работа без задачи (служебный коммит, правка опечатки)
+#
+# Если доска недоступна (нет сети/токена) — предупреждение, но коммит проходит:
+# блокировать разработку из-за сети нельзя.
+#
+# Обход (только осознанно): git commit --no-verify
+set -uo pipefail
+
+msg_file="${1:-}"
+[ -n "$msg_file" ] && [ -f "$msg_file" ] || exit 0
+
+msg="$(cat "$msg_file")"
+
+# 1. Явный отказ от задачи — с причиной.
+if printf '%s' "$msg" | grep -qE 'DevTask:[[:space:]]*none[[:space:]]*[—–-]+[[:space:]]*[^[:space:]]'; then
+	exit 0
+fi
+
+# 2. Идентификатор задачи.
+id="$(printf '%s' "$msg" | grep -oE 'DevTask:[[:space:]]*[a-z0-9]{15}([^a-z0-9]|$)' | head -1 |
+	sed -E 's/DevTask:[[:space:]]*([a-z0-9]{15}).*/\1/')"
+
+if [ -z "$id" ]; then
+	cat >&2 <<'EOF'
+── Коммит отклонён: нет строки DevTask ────────────────────────────────
+Каждая работа по проекту регистрируется на доске (/dev.html):
+
+  ./scripts/devtask.sh new --module <модуль> --title "что делаем"
+  ./scripts/devtask.sh start <id>
+  … правки, тесты, деплой …
+  git commit -m "…" -m "DevTask: <id>"
+  ./scripts/devtask.sh done <id> --commit auto --deployed
+
+Если задача действительно не нужна (служебный коммит, опечатка):
+
+  DevTask: none — <причина одной строкой>
+
+Осознанный обход: git commit --no-verify
+EOF
+	exit 1
+fi
+
+# 3. Проверка, что задача существует. Сеть/токен недоступны — только предупреждение.
+ENVF="$HOME/.config/astro3d/devtask.env"
+if [ -f "$ENVF" ]; then
+	# shellcheck disable=SC1090
+	. "$ENVF" 2>/dev/null || true
+fi
+API="${DEV_API:-https://astro3d.ru}"
+TOKEN="${DEV_TASK_TOKEN:-}"
+
+if [ -z "$TOKEN" ]; then
+	echo "commit-msg: нет DEV_TASK_TOKEN ($ENVF) — задача $id не проверена" >&2
+	exit 0
+fi
+
+flt="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote("id=\""+sys.argv[1]+"\""))' "$id" 2>/dev/null)"
+resp="$(curl -sS --max-time 8 -w '\n%{http_code}' -H "Authorization: Bearer $TOKEN" \
+	"$API/api/dev/tasks?perPage=1&filter=$flt" 2>/dev/null)" || {
+	echo "commit-msg: доска недоступна — задача $id не проверена" >&2
+	exit 0
+}
+code="$(printf '%s' "$resp" | tail -1)"
+resp="$(printf '%s' "$resp" | sed '$d')"
+if [ "$code" != "200" ]; then
+	echo "commit-msg: доска ответила $code — задача $id не проверена" >&2
+	exit 0
+fi
+
+status="$(printf '%s' "$resp" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(""); raise SystemExit
+items = d.get("tasks") or []
+print(items[0].get("status", "") if items else "")
+' 2>/dev/null)"
+
+if [ -z "$status" ]; then
+	cat >&2 <<EOF
+── Коммит отклонён: задачи $id на доске нет ───────────────────────────
+Создайте её (./scripts/devtask.sh new …) или укажите верный id.
+EOF
+	exit 1
+fi
+
+case "$status" in
+in_progress | done) ;;
+*)
+	echo "commit-msg: задача $id в статусе «$status» — обычно перед коммитом её берут в работу (devtask.sh start $id)" >&2
+	;;
+esac
+
+exit 0
