@@ -36,9 +36,25 @@ const (
 	tasksRunnerEnvRun = "RUN_TASKS_ONCE"
 )
 
+// dailyTransit — точный аспект дня в машиночитаемом виде. events хранит все
+// события календаря (лунный день, смены знака, станции, Луна без курса), а
+// transits — только точные аспекты: их удобно отдавать в рассылку и чат.
+type dailyTransit struct {
+	At     string `json:"at"` // ISO-8601 со смещением: 2026-11-04T10:33:00+03:00
+	P1     string `json:"p1"`
+	P2     string `json:"p2"`
+	Aspect int    `json:"aspect"`
+	De     []int  `json:"de,omitempty"` // эклиптические долготы участников
+}
+
 type dailyDay struct {
 	Date             string               `json:"date"` // YYYY-MM-DD по Москве
+	TZ               string               `json:"tz,omitempty"`
+	UTCOffset        float64              `json:"utc_offset,omitempty"`
 	Events           []astro.CompactEvent `json:"events"`
+	Transits         []dailyTransit       `json:"transits,omitempty"`
+	Text             string               `json:"text,omitempty"`    // готовый текст дня (RU, как на главной)
+	TextEN           string               `json:"text_en,omitempty"` // то же по-английски
 	Interpretation   string               `json:"interpretation,omitempty"`
 	InterpretationEN string               `json:"interpretation_en,omitempty"`
 	Model            string               `json:"model,omitempty"`
@@ -181,9 +197,11 @@ func processDailyCalendar(t fileTask, now time.Time) {
 	}
 	var missing []string
 	for _, d := range want {
-		// Нет дня, пустые события или нет текста хотя бы на одном языке —
-		// такие дни добираем (английский дотягивается отдельно, см. ниже).
-		if dd, ok := have[d]; !ok || strings.TrimSpace(dd.Interpretation) == "" || strings.TrimSpace(dd.InterpretationEN) == "" || len(dd.Events) == 0 {
+		// Нет дня, пустые события, нет готового текста/интерпретации хотя бы
+		// на одном языке — такие дни добираем. Текст дня детерминирован:
+		// он появился позже, поэтому старые daily.json тоже попадают сюда
+		// и молча доливают text/transits без вызова ИИ.
+		if dd, ok := have[d]; !ok || strings.TrimSpace(dd.Interpretation) == "" || strings.TrimSpace(dd.InterpretationEN) == "" || strings.TrimSpace(dd.Text) == "" || len(dd.Events) == 0 {
 			missing = append(missing, d)
 		}
 	}
@@ -232,6 +250,12 @@ func processDailyCalendar(t fileTask, now time.Time) {
 			dd.Events = events
 			dd.FetchedAt = now.UTC().Format(time.RFC3339)
 		}
+		// Готовый текст и транзиты — всегда из свежего календаря, без ИИ.
+		dd.TZ = dailyDefaultTZ
+		dd.UTCOffset = dailyUTCOffset(d, msk)
+		dd.Transits = dailyTransits(events, msk)
+		dd.Text = dailyText(d, events, msk, false)
+		dd.TextEN = dailyText(d, events, msk, true)
 		if strings.TrimSpace(dd.Interpretation) == "" {
 			text, model, err := interpretDay(t, d, events)
 			if err != nil {
@@ -297,6 +321,219 @@ func saveDailyFile(path string, df *dailyFile) {
 	if err := os.Rename(tmp, path); err != nil {
 		log.Printf("Задачи: ошибка публикации %s: %v", path, err)
 	}
+}
+
+// --- Готовый текст дня для daily.json ---------------------------------------
+//
+// Тот же вид, что на главной: число, день недели, лунный день/четверть,
+// события с временами и подпись «Время (мск)». Собирается кодом, а не ИИ:
+// текст детерминирован, не зависит от модели и не тратит токены. Номера домов
+// сюда не попадают: daily.json — общий файл, Asc/натальной карты у него нет.
+
+var dailyWeekdaysRu = [...]string{
+	"Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота",
+}
+
+var dailySignGlyphs = [...]string{
+	"♈\uFE0E", "♉\uFE0E", "♊\uFE0E", "♋\uFE0E", "♌\uFE0E", "♍\uFE0E",
+	"♎\uFE0E", "♏\uFE0E", "♐\uFE0E", "♑\uFE0E", "♒\uFE0E", "♓\uFE0E",
+}
+
+var dailyAspectGlyphs = map[string]string{
+	"0": "☌", "30": "⚺", "45": "∠", "60": "⚹", "72": "⬠",
+	"90": "☐", "120": "∆", "135": "⚼", "150": "⚻", "180": "☍",
+}
+
+var dailyPlanetGlyphs = map[int]string{
+	0: "☉", 2: "☿", 3: "♀", 4: "♂", 5: "♃", 6: "♄", 7: "♅",
+	8: "♆", 9: "♇", 10: "☊", 11: "☋", 12: "⚸", 14: "♁", 15: "⚷",
+	17: "⚳", 18: "⚴", 19: "⚵", 20: "⚶",
+}
+
+func dailyMoonGlyph(lunarDay int) string {
+	if lunarDay > 15 {
+		return "☾"
+	}
+	return "☽"
+}
+
+func dailyPlanetGlyph(id string, lunarDay int) string {
+	n, err := strconv.Atoi(strings.TrimSpace(id))
+	if err != nil {
+		return id
+	}
+	if n == 1 { // Луна: как на главной, растущая/убывающая
+		return dailyMoonGlyph(lunarDay)
+	}
+	if g, ok := dailyPlanetGlyphs[n]; ok {
+		return g
+	}
+	return id
+}
+
+func dailySignGlyph(sign int) string {
+	if sign >= 0 && sign < len(dailySignGlyphs) {
+		return dailySignGlyphs[sign]
+	}
+	return ""
+}
+
+// dailyZodText — «(12♍︎)»: градус внутри знака + глиф знака.
+func dailyZodText(lon int) string {
+	lon = ((lon % 360) + 360) % 360
+	return fmt.Sprintf("(%d%s)", lon%30, dailySignGlyph(lon/30))
+}
+
+func dailyAspectGlyph(a string) string {
+	if g, ok := dailyAspectGlyphs[strings.TrimSpace(a)]; ok {
+		return g
+	}
+	return strings.TrimSpace(a) + "°"
+}
+
+func dailyQuarterName(lunarDay int, en bool) string {
+	q := (lunarDay-1)/7 + 1
+	if q < 1 {
+		q = 1
+	}
+	if q > 4 {
+		q = 4
+	}
+	if en {
+		return [...]string{"first quarter", "second quarter", "third quarter", "fourth quarter"}[q-1]
+	}
+	return [...]string{"I четверть", "II четверть", "III четверть", "IV четверть"}[q-1]
+}
+
+func dailyEventTime(s string, loc *time.Location) (time.Time, bool) {
+	t, err := time.ParseInLocation("2006-01-02T15:04", strings.TrimSpace(s), loc)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func dailyEventLine(e astro.CompactEvent, loc *time.Location, lunarDay int, en bool) string {
+	t, ok := dailyEventTime(e.Date, loc)
+	if !ok {
+		return ""
+	}
+	hhmm := t.Format("15:04")
+	switch e.Type {
+	case "lunD":
+		if e.Sign != nil {
+			unit := "л.д."
+			if en {
+				unit = "l.d."
+			}
+			return fmt.Sprintf("%s → %d %s", hhmm, *e.Sign, unit)
+		}
+	case "exA":
+		if len(e.Planets) >= 2 && len(e.Degrees) >= 2 {
+			return fmt.Sprintf("%s ⬤%s%s %s %s%s", hhmm,
+				dailyPlanetGlyph(e.Planets[0], lunarDay), dailyZodText(e.Degrees[0]),
+				dailyAspectGlyph(e.Aspect),
+				dailyPlanetGlyph(e.Planets[1], lunarDay), dailyZodText(e.Degrees[1]))
+		}
+	case "chS":
+		if len(e.Planets) >= 1 && e.Sign != nil {
+			return fmt.Sprintf("%s %s → %s", hhmm,
+				dailyPlanetGlyph(e.Planets[0], lunarDay), dailySignGlyph(*e.Sign))
+		}
+	case "noC":
+		end := strings.TrimSpace(e.VoidEnd)
+		if end == "" {
+			end = strings.TrimSpace(e.ChangeSign)
+		}
+		if end != "" {
+			et, ok := dailyEventTime(end, loc)
+			if ok {
+				s := fmt.Sprintf("%s -%s %s", hhmm, dailyMoonGlyph(lunarDay), et.Format("15:04"))
+				if et.Format("2006-01-02") != t.Format("2006-01-02") {
+					s += " " + et.Format("02.01")
+				}
+				return s
+			}
+		}
+	case "r":
+		if len(e.Planets) >= 1 {
+			dir := "D"
+			if e.Retro != nil && *e.Retro == 1 {
+				dir = "R"
+			}
+			return fmt.Sprintf("%s %s %s", hhmm, dailyPlanetGlyph(e.Planets[0], lunarDay), dir)
+		}
+	}
+	return ""
+}
+
+// dailyText — готовый текст дня. date — YYYY-MM-DD, events — уже в loc.
+func dailyText(date string, events []astro.CompactEvent, loc *time.Location, en bool) string {
+	t, err := time.ParseInLocation("2006-01-02", date, loc)
+	if err != nil {
+		return ""
+	}
+	lines := []string{t.Format("2")}
+	if en {
+		lines = append(lines, t.Weekday().String())
+	} else {
+		lines = append(lines, dailyWeekdaysRu[int(t.Weekday())])
+	}
+	lunarDay := 0
+	for _, e := range events {
+		if e.Type == "lunD" && e.Sign != nil {
+			lunarDay = *e.Sign
+			break
+		}
+	}
+	if lunarDay > 0 {
+		if en {
+			lines = append(lines, fmt.Sprintf("%d l.d., %s %s", lunarDay, dailyQuarterName(lunarDay, true), dailyMoonGlyph(lunarDay)))
+		} else {
+			lines = append(lines, fmt.Sprintf("%d л.д., %s %s", lunarDay, dailyQuarterName(lunarDay, false), dailyMoonGlyph(lunarDay)))
+		}
+	}
+	for _, e := range events {
+		if line := dailyEventLine(e, loc, lunarDay, en); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if en {
+		lines = append(lines, "Time (MSK)")
+	} else {
+		lines = append(lines, "Время (мск)")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// dailyTransits — только точные аспекты дня, с явным смещением времени.
+func dailyTransits(events []astro.CompactEvent, loc *time.Location) []dailyTransit {
+	out := make([]dailyTransit, 0, len(events))
+	for _, e := range events {
+		if e.Type != "exA" || len(e.Planets) < 2 {
+			continue
+		}
+		t, ok := dailyEventTime(e.Date, loc)
+		if !ok {
+			continue
+		}
+		angle, _ := strconv.Atoi(strings.TrimSpace(e.Aspect))
+		tr := dailyTransit{At: t.Format(time.RFC3339), P1: e.Planets[0], P2: e.Planets[1], Aspect: angle}
+		if len(e.Degrees) >= 2 {
+			tr.De = []int{e.Degrees[0], e.Degrees[1]}
+		}
+		out = append(out, tr)
+	}
+	return out
+}
+
+func dailyUTCOffset(date string, loc *time.Location) float64 {
+	t, err := time.ParseInLocation("2006-01-02", date, loc)
+	if err != nil {
+		return 0
+	}
+	_, off := t.Add(12 * time.Hour).Zone()
+	return float64(off) / 3600
 }
 
 // Дефолтный промпт, если нет prompts/daily.txt. Плейсхолдеры {{DATE}}, {{LEGEND}} и {{EVENTS}}.
