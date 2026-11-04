@@ -7,8 +7,8 @@
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-export CGO_CFLAGS="${CGO_CFLAGS:--I/home/dmyr/swisseph_build/include}"
-export CGO_LDFLAGS="${CGO_LDFLAGS:--L/home/dmyr/swisseph_build/lib -lswe -lm}"
+export CGO_CFLAGS="${CGO_CFLAGS:--I/home/dmyr/app/src/swisseph_build/include}"
+export CGO_LDFLAGS="${CGO_LDFLAGS:--L/home/dmyr/app/src/swisseph_build/lib -lswe -lm}"
 
 name=$(basename "$PWD")
 rc=0

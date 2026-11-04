@@ -7,4 +7,4 @@ require (
 	github.com/joho/godotenv v1.5.1
 )
 
-replace github.com/damirmur/swisseph_build => /home/dmyr/swisseph_build
+replace github.com/damirmur/swisseph_build => /home/dmyr/app/src/swisseph_build

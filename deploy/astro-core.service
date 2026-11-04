@@ -12,9 +12,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=dmyr
-WorkingDirectory=/var/www/astro3d.ru
-EnvironmentFile=/home/dmyr/astro-core/astro.env
-ExecStart=/home/dmyr/astro-core/astro-core
+WorkingDirectory=/home/dmyr/app/astro3d.ru
+EnvironmentFile=/home/dmyr/app/services/astro-core/astro.env
+ExecStart=/home/dmyr/app/services/astro-core/astro-core
 Restart=on-failure
 RestartSec=5
 

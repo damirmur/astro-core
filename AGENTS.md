@@ -20,28 +20,32 @@
 ```bash
 ./scripts/test.sh        # gofmt + vet + сборка + go test -cover, CGO-переменные уже внутри
 go build -o /tmp/astro-core-new .
-install -m 755 /tmp/astro-core-new /home/dmyr/astro-core/astro-core
+install -m 755 /tmp/astro-core-new /home/dmyr/app/services/astro-core/astro-core
 sudo /usr/bin/systemctl restart astro-core.service
 curl -s http://127.0.0.1:8084/healthz
 ```
 
-CGO: `CGO_CFLAGS=-I/home/dmyr/swisseph_build/include`,
-`CGO_LDFLAGS=-L/home/dmyr/swisseph_build/lib -lswe -lm`; в `go.mod` — `replace` на
-`/home/dmyr/swisseph_build`. Голый `go build` без переменных падает.
+CGO: `CGO_CFLAGS=-I/home/dmyr/app/src/swisseph_build/include`,
+`CGO_LDFLAGS=-L/home/dmyr/app/src/swisseph_build/lib -lswe -lm`; в `go.mod` — `replace` на
+`/home/dmyr/app/src/swisseph_build`. Голый `go build` без переменных падает.
 
-Юнит — `astro-core.service`, env — `/home/dmyr/astro-core/*.env` (600).
+Юнит — `astro-core.service`, env — `/home/dmyr/app/services/astro-core/*.env` (600).
 
 ## Env
 
-`ASTRO_PORT`, `EPHE_PATH` (эфемериды, по умолчанию `ephe` рядом с бинарём),
-`GEO_INDEX_PATH` (`geo/cities.idx`), `DAILY_LLM_MODELS`, `LLM_GATEWAY_URL`/`LLM_PROXY_KEY`
-(:8086 для ИИ ежедневного прогноза), `NOTIFY_KEY`.
+`ASTRO_PORT`, `EPHE_PATH` (сейчас `/home/dmyr/app/data/ephe`),
+`GEO_INDEX_PATH` (`/home/dmyr/app/data/geo/cities.idx`), `DAILY_LLM_MODELS`,
+`LLM_GATEWAY_URL`/`LLM_PROXY_KEY` (:8086 для ИИ ежедневного прогноза), `NOTIFY_KEY`.
+
+**Без `EPHE_PATH`** Swiss Ephemeris молча уходит в Moshier: расчёты работают, но времена
+событий «плывут» на секунды-минуты и падают эталоны `astro3d-e2e`. В логе при старте
+должен быть реальный путь, а не голое `ephe`.
 
 ## Фоновый расчёт прогноза
 
 `tasks_calendar.go`, раннер `startTaskRunner`: задача `daily_calendar` из `tasks.json`
-(читается из `/var/www/astro3d.ru`), окно `[вчера, +3 дня]` по Москве, пишет
-`/var/www/astro3d.ru/html/data/daily.json`; стейт — `output_data/tasks_state.json`.
+(читается из `/home/dmyr/app/astro3d.ru`), окно `[вчера, +3 дня]` по Москве, пишет
+`/home/dmyr/app/astro3d.ru/html/data/daily.json`; стейт — `output_data/tasks_state.json`.
 Ручной прогон — `RUN_TASKS_ONCE=1`. ИИ — HTTP в llm-1c, модели из `DAILY_LLM_MODELS`
 (дальше `params.llm_models` → автопоиск `*free*`).
 
