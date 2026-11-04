@@ -288,6 +288,7 @@ func resolveGeoAndTime(city string, dateStr string, timeStr string) (*interactiv
 type natalDataNoHouses struct {
 	Planets []astro.PlanetPoint `json:"planets"`
 	Aspects []astro.Aspect      `json:"aspects,omitempty"`
+	Balance astro.Balance       `json:"balance"`
 }
 
 type synastryDataNoHouses struct {
@@ -334,7 +335,7 @@ func parseHousesMode(q url.Values) (bool, error) {
 func natalPayload(res *astro.AstroResult, housesNone bool) any {
 	d := astro.ToNatalData(res)
 	if housesNone {
-		return natalDataNoHouses{Planets: d.Planets, Aspects: d.Aspects}
+		return natalDataNoHouses{Planets: d.Planets, Aspects: d.Aspects, Balance: d.Balance}
 	}
 	return d
 }
@@ -346,8 +347,8 @@ func synastryPayload(res *astro.AstroResult, housesNone bool) any {
 		return d
 	}
 	return synastryDataNoHouses{
-		Chart1:  natalDataNoHouses{Planets: d.Chart1.Planets, Aspects: d.Chart1.Aspects},
-		Chart2:  natalDataNoHouses{Planets: d.Chart2.Planets, Aspects: d.Chart2.Aspects},
+		Chart1:  natalDataNoHouses{Planets: d.Chart1.Planets, Aspects: d.Chart1.Aspects, Balance: d.Chart1.Balance},
+		Chart2:  natalDataNoHouses{Planets: d.Chart2.Planets, Aspects: d.Chart2.Aspects, Balance: d.Chart2.Balance},
 		Aspects: d.Aspects,
 	}
 }
@@ -356,7 +357,7 @@ func synastryPayload(res *astro.AstroResult, housesNone bool) any {
 // натала и без номера дома в рядах транзитов.
 func natalPeriodWithoutHouses(res *astro.NatalPeriodData) natalPeriodDataNoHouses {
 	out := natalPeriodDataNoHouses{
-		Natal:   natalDataNoHouses{Planets: res.Natal.Planets, Aspects: res.Natal.Aspects},
+		Natal:   natalDataNoHouses{Planets: res.Natal.Planets, Aspects: res.Natal.Aspects, Balance: res.Natal.Balance},
 		Aspects: res.Aspects,
 	}
 	out.Transits.Date = res.Transits.Date
