@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# pre-push — быстрый Go-контур перед пушем: без браузера и прод-канарейки.
+# Полный прогон с браузером — ночной a3d-tests.timer.
+# Обход (осознанно): A3D_SKIP_PREPUSH=1 git push
+set -uo pipefail
+[ "${A3D_SKIP_PREPUSH:-0}" = "1" ] && exit 0
+exec env SKIP_CANARY=1 SKIP_BROWSER=1 /home/dmyr/app/src/astro3d-e2e/scripts/test-all.sh
