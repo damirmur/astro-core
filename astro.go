@@ -807,6 +807,11 @@ func handlePeriod(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	release, ok := heavy.acquire(w)
+	if !ok {
+		return
+	}
+	defer release()
 
 	ephePath := GetEphePath()
 	calc := astro.NewCalculator(ephePath)
@@ -980,6 +985,12 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// --- Расчёт ---
+	release, ok := heavy.acquire(w)
+	if !ok {
+		return
+	}
+	defer release()
+
 	ephePath := GetEphePath()
 	calc := astro.NewCalculator(ephePath)
 	defer calc.Close()
@@ -1060,6 +1071,12 @@ func handleReturns(w http.ResponseWriter, r *http.Request) {
 		w.Write(cachedData)
 		return
 	}
+
+	release, ok := heavy.acquire(w)
+	if !ok {
+		return
+	}
+	defer release()
 
 	// --- Натал ---
 	latVal := q.Get("lat")
@@ -1316,6 +1333,12 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 		w.Write(cachedData)
 		return
 	}
+
+	release, ok := heavy.acquire(w)
+	if !ok {
+		return
+	}
+	defer release()
 
 	// Определение геоданных и временной зоны (нужно до разбора периода)
 	var loc *time.Location = time.UTC
