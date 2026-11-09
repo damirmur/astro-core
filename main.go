@@ -5,7 +5,9 @@ package main
 import (
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -52,6 +54,16 @@ func main() {
 		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       75 * time.Second,
 		MaxHeaderBytes:    1 << 20,
+	}
+	// pprof — только по явному env-флагу и только loopback:
+	// без него горутины и блокировки под нагрузкой не видны.
+	if pprofAddr := strings.TrimSpace(os.Getenv("PPROF_ADDR")); pprofAddr != "" {
+		go func() {
+			log.Printf("pprof слушает %s", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				log.Printf("pprof: %v", err)
+			}
+		}()
 	}
 	log.Printf("astro-core слушает %s", addr)
 	if err := srv.ListenAndServe(); err != nil {
