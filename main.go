@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -40,8 +41,20 @@ func main() {
 	if v := os.Getenv("ASTRO_PORT"); v != "" {
 		addr = v
 	}
+	// Таймауты обязательны: без них медленный клиент держит соединение и
+	// горутину бесконечно, а под нагрузкой сервер копит запросы вместо отсечки.
+	// WriteTimeout с запасом: самый тяжёлый расчёт (calendar/period) — секунды.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       75 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 	log.Printf("astro-core слушает %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("astro: ошибка запуска: %v", err)
 	}
 }

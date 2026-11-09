@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,14 @@ import (
 // Длительность кэша астро-ответов (как в монолите).
 const CacheDuration = 24 * time.Hour
 
+// Пределы кэша. Ключ зависит только от значимых параметров (см. cacheParams),
+// но даже при этом поток уникальных запросов не должен съедать память:
+// на 1 ГБ RAM кэш ограничен по числу записей и по объёму.
+const (
+	cacheMaxEntries = 4000
+	cacheMaxBytes   = 64 << 20 // 64 МБ
+)
+
 // Структура для кэширования ответов в памяти
 type CacheEntry struct {
 	Response   []byte
@@ -28,14 +37,23 @@ type CacheEntry struct {
 }
 
 type MemoryCache struct {
-	mu    sync.RWMutex
-	items map[string]CacheEntry
+	mu         sync.RWMutex
+	items      map[string]CacheEntry
+	maxEntries int
+	maxBytes   int64
+	bytes      int64
+}
+
+func newMemoryCache(maxEntries int, maxBytes int64) *MemoryCache {
+	return &MemoryCache{
+		items:      make(map[string]CacheEntry),
+		maxEntries: maxEntries,
+		maxBytes:   maxBytes,
+	}
 }
 
 func NewMemoryCache() *MemoryCache {
-	cache := &MemoryCache{
-		items: make(map[string]CacheEntry),
-	}
+	cache := newMemoryCache(cacheMaxEntries, cacheMaxBytes)
 	go cache.startCleanupTimer()
 	return cache
 }
@@ -56,9 +74,56 @@ func (c *MemoryCache) Get(key string) ([]byte, bool) {
 func (c *MemoryCache) Set(key string, response []byte, duration time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if old, ok := c.items[key]; ok {
+		c.bytes -= int64(len(old.Response))
+	}
 	c.items[key] = CacheEntry{
 		Response:   response,
 		Expiration: time.Now().Add(duration),
+	}
+	c.bytes += int64(len(response))
+	c.evictLocked()
+}
+
+// evictLocked удаляет просроченное, затем самые старые записи, пока кэш
+// не вернётся в пределы. Вызывается под Lock.
+func (c *MemoryCache) evictLocked() {
+	if len(c.items) <= c.maxEntries && c.bytes <= c.maxBytes {
+		return
+	}
+	now := time.Now()
+	for k, v := range c.items {
+		if now.After(v.Expiration) {
+			c.bytes -= int64(len(v.Response))
+			delete(c.items, k)
+		}
+	}
+	if len(c.items) <= c.maxEntries && c.bytes <= c.maxBytes {
+		return
+	}
+	// Оставляем 90 % от лимитов: иначе следующая вставка снова упрётся в край.
+	targetEntries := c.maxEntries * 9 / 10
+	if targetEntries < 1 {
+		targetEntries = 1
+	}
+	targetBytes := c.maxBytes * 9 / 10
+	type pair struct {
+		key string
+		exp time.Time
+	}
+	all := make([]pair, 0, len(c.items))
+	for k, v := range c.items {
+		all = append(all, pair{k, v.Expiration})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].exp.Before(all[j].exp) })
+	for _, p := range all {
+		if len(c.items) <= targetEntries && c.bytes <= targetBytes {
+			break
+		}
+		if v, ok := c.items[p.key]; ok {
+			c.bytes -= int64(len(v.Response))
+			delete(c.items, p.key)
+		}
 	}
 }
 
@@ -69,6 +134,7 @@ func (c *MemoryCache) startCleanupTimer() {
 		now := time.Now()
 		for k, v := range c.items {
 			if now.After(v.Expiration) {
+				c.bytes -= int64(len(v.Response))
 				delete(c.items, k)
 			}
 		}
@@ -79,9 +145,41 @@ func (c *MemoryCache) startCleanupTimer() {
 // Глобальный кэш
 var cache = NewMemoryCache()
 
+// cacheParams — параметры, которые действительно влияют на ответ каждой ручки.
+// Всё остальное (случайный &x=, utm-метки) в ключ не попадает: иначе один и тот
+// же расчёт с уникальным мусором в query каждый раз промахивается и оседает
+// в кэше до истечения TTL.
+var cacheParams = map[string]map[string]bool{
+	"natal":        setOf("city", "date", "time", "hsys", "lat", "lon", "houses", "max_orb", "planets", "aspects"),
+	"synastry":     setOf("city1", "date1", "time1", "city2", "date2", "time2", "hsys", "houses", "max_orb", "planets", "aspects"),
+	"period":       setOf("start", "end", "step", "city", "houses", "max_orb", "planets", "aspects"),
+	"natal-period": setOf("date", "time", "hsys", "city", "lat", "lon", "houses", "start", "end", "step", "max_orb", "planets", "aspects"),
+	"returns":      setOf("city", "date", "time", "hsys", "lat", "lon", "ref_date", "ref_time", "ref_city", "ref_lat", "ref_lon"),
+	"calendar":     setOf("year", "month", "city", "sign", "max_orb", "planets", "aspects"),
+	"translate":    setOf("q", "tl", "sl"),
+}
+
+func setOf(keys ...string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	return m
+}
+
 // Вспомогательная функция для генерации ключа кэша
 func generateCacheKey(prefix string, params url.Values) string {
-	hash := sha256.Sum256([]byte(prefix + "?" + params.Encode()))
+	filtered := url.Values{}
+	if allowed := cacheParams[prefix]; allowed != nil {
+		for k, v := range params {
+			if allowed[k] {
+				filtered[k] = v
+			}
+		}
+	} else {
+		filtered = params
+	}
+	hash := sha256.Sum256([]byte(prefix + "?" + filtered.Encode()))
 	return fmt.Sprintf("%x", hash)
 }
 
@@ -705,6 +803,10 @@ func handlePeriod(w http.ResponseWriter, r *http.Request) {
 			stepHours = val
 		}
 	}
+	if err := validatePeriodBounds(tStart, tEnd, stepHours); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	ephePath := GetEphePath()
 	calc := astro.NewCalculator(ephePath)
@@ -849,6 +951,10 @@ func handleNatalPeriod(w http.ResponseWriter, r *http.Request) {
 		if endStr == "" {
 			endUTC = startUTC.AddDate(0, 1, 0)
 		}
+	}
+	if err := validatePeriodBounds(startUTC, endUTC, step); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// --- Транзитные планеты ---
@@ -1112,6 +1218,31 @@ func parsePeriodRange(startStr, endStr, city string) (time.Time, time.Time, erro
 		te = te.UTC()
 	}
 	return ts, te, nil
+}
+
+// Пределы одного периода: запрос не должен превращаться в минуты CPU.
+// Клиент задаёт start/end/step сам, поэтому без границы ?start=1900&end=2100
+// считается десятки секунд одним запросом (см. docs/agents/load-testing.md).
+const (
+	maxPeriodYears  = 10
+	maxPeriodSlices = 5000
+)
+
+func validatePeriodBounds(start, end time.Time, stepHours int) error {
+	if stepHours <= 0 {
+		stepHours = 24
+	}
+	if !start.Before(end) {
+		return fmt.Errorf("'start' должен быть раньше 'end'")
+	}
+	if end.After(start.AddDate(maxPeriodYears, 0, 0)) {
+		return fmt.Errorf("период больше %d лет не поддерживается", maxPeriodYears)
+	}
+	slices := int(end.Sub(start)/(time.Duration(stepHours)*time.Hour)) + 1
+	if slices > maxPeriodSlices {
+		return fmt.Errorf("слишком много точек периода: %d (максимум %d); увеличьте step", slices, maxPeriodSlices)
+	}
+	return nil
 }
 
 func parseIDList(s string) []int {

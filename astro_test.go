@@ -257,3 +257,63 @@ func TestHealthz(t *testing.T) {
 		t.Errorf("status=%q", out["status"])
 	}
 }
+
+func TestCacheKeyIgnoresJunkParams(t *testing.T) {
+	a := url.Values{"city": {"Москва"}, "date": {"1990-05-15"}, "x": {"1"}}
+	b := url.Values{"city": {"Москва"}, "date": {"1990-05-15"}, "x": {"2"}, "utm_source": {"tg"}}
+	if generateCacheKey("natal", a) != generateCacheKey("natal", b) {
+		t.Fatal("мусорные параметры не должны менять ключ кэша")
+	}
+	c := url.Values{"city": {"Москва"}, "date": {"1990-05-16"}}
+	if generateCacheKey("natal", a) == generateCacheKey("natal", c) {
+		t.Fatal("значимый параметр date должен менять ключ")
+	}
+}
+
+func TestMemoryCacheLimits(t *testing.T) {
+	c := newMemoryCache(3, 100)
+	for i := 0; i < 10; i++ {
+		c.Set(string(rune('a'+i)), []byte(strings.Repeat("x", 40)), time.Hour)
+	}
+	if len(c.items) > 3 {
+		t.Fatalf("записей %d, лимит 3", len(c.items))
+	}
+	if c.bytes > 100 {
+		t.Fatalf("байт %d, лимит 100", c.bytes)
+	}
+	total := 0
+	for _, v := range c.items {
+		total += len(v.Response)
+	}
+	if int64(total) != c.bytes {
+		t.Fatalf("счётчик байт %d не совпадает с суммой %d", c.bytes, total)
+	}
+}
+
+func TestPeriodBounds(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		start time.Time
+		end   time.Time
+		step  int
+		ok    bool
+	}{
+		{"год посуточно", start, start.AddDate(1, 0, 0), 24, true},
+		{"десять лет посуточно", start, start.AddDate(10, 0, 0), 24, true},
+		{"больше десяти лет", start, start.AddDate(11, 0, 0), 24, false},
+		{"год почасово", start, start.AddDate(1, 0, 0), 1, false},
+		{"конец раньше начала", start.AddDate(0, 0, 1), start, 24, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validatePeriodBounds(c.start, c.end, c.step)
+			if c.ok && err != nil {
+				t.Fatalf("ожидалось ok, получено %v", err)
+			}
+			if !c.ok && err == nil {
+				t.Fatal("ожидалась ошибка")
+			}
+		})
+	}
+}
