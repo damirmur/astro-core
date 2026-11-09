@@ -70,3 +70,13 @@ CGO: `CGO_CFLAGS=-I/home/dmyr/app/src/swisseph_build/include`,
 ## Где документация
 
 `docs/agents/task-runner.md` (прогноз), `docs/api/astro.md` (контракты), `docs/agents/services.md`.
+
+## Лицензия
+
+- Репозиторий — **AGPL-3.0** (`LICENSE`): сервис линкует `swisseph_build`, внутри которого
+  Swiss Ephemeris под AGPL-3.0. Вариант Professional не выбран, поэтому расчётный контур
+  открыт; `site-cloud` и фронтенд — отдельные программы за HTTP и остаются проприетарными.
+- `NOTICE` — копирайты Astrodienst, версия SE, Corresponding Source, сборка и source offer §13.
+  Репозиторий публичный: <https://github.com/damirmur/astro-core>.
+- Секреты в репозиторий не попадают: env и ключи — в `/home/dmyr/app/services/astro-core/*.env` (600).
+  Новые зависимости от SE-кода должны оставаться AGPL-совместимыми.

@@ -1,0 +1,49 @@
+# NOTICE — лицензии и происхождение кода
+
+## Лицензия репозитория
+
+Copyright (C) 2023–2026 Муратов Дамир Юсифович.
+
+Код сервиса распространяется под **GNU Affero General Public License v3.0** —
+полный текст в [`LICENSE`](LICENSE).
+
+## Зависимость: swisseph_build / Swiss Ephemeris
+
+`astro-core` линкует `github.com/damirmur/swisseph_build` через CGO. Эта
+библиотека распространяется под AGPL-3.0 и содержит Swiss Ephemeris:
+
+- Copyright (C) 1997–2021 Astrodienst AG, Switzerland. All rights reserved.
+- Authors: Dieter Koch and Alois Treindl.
+- `SE_VERSION`: `2.10.03`, upstream-тег `v2.10.3final`
+  (commit `af9823fe7b06ffefe3d3968fdc5680be8b5eec5f`).
+- Исходники: <https://github.com/damirmur/swisseph_build> (коммит `36a9f7d`,
+  соответствующий этой версии `astro-core`).
+
+Файлы эфемерид (`sepl_*.se1`, `semo_*.se1`, `seas_*.se1`) — данные Astrodienst,
+распространяются на тех же условиях. В репозиториях они не хранятся; на сервере
+лежат в `/home/dmyr/app/data/ephe` (`EPHE_PATH`).
+
+## Corresponding Source и сборка
+
+Полный исходный код сервиса — в этом репозитории. Для сборки нужны оба
+репозитория и файлы эфемерид:
+
+```bash
+git clone https://github.com/damirmur/swisseph_build ../swisseph_build
+(cd ../swisseph_build && ./scripts/build-libswe.sh)
+go mod edit -replace github.com/damirmur/swisseph_build=../swisseph_build
+./scripts/test.sh
+go build -o astro-core .
+```
+
+`scripts/test.sh` сам выставляет `CGO_CFLAGS`/`CGO_LDFLAGS` на соседний
+`swisseph_build`; `go.mod` в рабочей копии содержит локальный `replace` на
+`/home/dmyr/app/src/swisseph_build` — при сборке вне этого сервера его нужно
+заменить (см. команду выше). Файлы эфемерид скачиваются с
+<https://www.astro.com/ftp/swisseph/ephe/> и кладутся в каталог `EPHE_PATH`.
+
+## Source offer (§13 AGPL)
+
+Сервис <https://astro3d.ru> использует этот код по сети. Исходный код доступен
+по адресу <https://github.com/damirmur/astro-core>; версия, соответствующая
+развёрнутому сервису, фиксируется коммитом в задаче деплоя.
