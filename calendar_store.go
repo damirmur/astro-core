@@ -23,6 +23,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,6 +94,53 @@ func saveCalendarYear(f *calendarYearFile) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
+	if err := os.Rename(tmp, final); err != nil {
+		return err
+	}
+	return updateCalendarIndex()
+}
+
+// calendarIndex — маленький манифест для клиента: какие годы уже посчитаны.
+// Лежит рядом (html/data/calendar/index.json), отдаётся статикой; клиент по нему
+// решает: год есть — API (быстро из файла), нет — считаем в браузере.
+type calendarIndex struct {
+	Version   string `json:"version"`
+	Years     []int  `json:"years"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+func updateCalendarIndex() error {
+	dir := calendarStoreDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	years := make([]int, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || name == "index.json" || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		y, err := strconv.Atoi(strings.TrimSuffix(name, ".json"))
+		if err == nil {
+			years = append(years, y)
+		}
+	}
+	sort.Ints(years)
+	idx := calendarIndex{
+		Version:   calendarStoreVersion,
+		Years:     years,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(idx)
+	if err != nil {
+		return err
+	}
+	final := filepath.Join(dir, "index.json")
+	tmp := final + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
 	return os.Rename(tmp, final)
 }
 
@@ -154,6 +203,9 @@ func fileSizeKB(path string) float64 {
 // следующий год. Если слот занят, повторяем через 10 минут.
 func startCalendarStore() {
 	go func() {
+		if err := updateCalendarIndex(); err != nil {
+			log.Printf("calendar store: index: %v", err)
+		}
 		for {
 			now := time.Now()
 			busy := false
