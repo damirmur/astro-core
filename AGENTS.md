@@ -34,7 +34,8 @@ CGO: `CGO_CFLAGS=-I/home/dmyr/app/src/swisseph_build/include`,
 ## Env
 
 `ASTRO_PORT`, `EPHE_PATH` (сейчас `/home/dmyr/app/data/ephe`),
-`GEO_INDEX_PATH` (`/home/dmyr/app/data/geo/cities.idx`), `DAILY_LLM_MODELS`,
+`GEO_INDEX_PATH` (`/home/dmyr/app/data/geo/cities.idx`), `CALENDAR_STORE_DIR`
+(по умолчанию `html/data/calendar`), `DAILY_LLM_MODELS`,
 `LLM_GATEWAY_URL`/`LLM_PROXY_KEY` (:8086 для ИИ ежедневного прогноза), `NOTIFY_KEY`.
 
 **Без `EPHE_PATH`** Swiss Ephemeris молча уходит в Moshier: расчёты работают, но времена
@@ -48,6 +49,16 @@ CGO: `CGO_CFLAGS=-I/home/dmyr/app/src/swisseph_build/include`,
 `/home/dmyr/app/astro3d.ru/html/data/daily.json`; стейт — `output_data/tasks_state.json`.
 Ручной прогон — `RUN_TASKS_ONCE=1`. ИИ — HTTP в llm-1c, модели из `DAILY_LLM_MODELS`
 (дальше `params.llm_models` → автопоиск `*free*`).
+
+## Календарь и годовое хранилище
+
+`calendar_store.go`: `html/data/calendar/<year>.json` (gitignored, `CALENDAR_STORE_DIR`)
+— сырые события календаря в UTC, версия `calendar/v1;se=2.10.03`. Заполняется при
+старте и раз в сутки для текущего и следующего года (1 января следующий появляется
+сам), тяжёлый слот через `tryAcquire`. `/api/v1/calendar` читает файл, фильтрует
+по диапазону и форматирует даты в поясе города; нет файла или версия устарела —
+старый расчёт на месте (heavy gate). `calendarStoreVersion` бампать при правках
+`pkg/astro/calendar*.go` или обновлении SE. Подробности — `docs/agents/calendar.md`.
 
 ## Геокодер
 

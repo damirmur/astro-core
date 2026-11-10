@@ -26,6 +26,17 @@ func newHeavyGate(n int) *heavyGate {
 	return &heavyGate{slots: make(chan struct{}, n)}
 }
 
+// tryAcquire берёт слот без ожидания и без ответа клиенту: для фоновых задач
+// (например, предрасчёт календаря), которые не должны выбивать 503 у запросов.
+func (g *heavyGate) tryAcquire() (release func(), ok bool) {
+	select {
+	case g.slots <- struct{}{}:
+		return func() { <-g.slots }, true
+	default:
+		return nil, false
+	}
+}
+
 // acquire берёт слот без ожидания. false — слот занят, ответ уже отправлен.
 func (g *heavyGate) acquire(w http.ResponseWriter) (release func(), ok bool) {
 	select {

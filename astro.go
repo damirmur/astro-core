@@ -1334,12 +1334,6 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	release, ok := heavy.acquire(w)
-	if !ok {
-		return
-	}
-	defer release()
-
 	// Определение геоданных и временной зоны (нужно до разбора периода)
 	var loc *time.Location = time.UTC
 	var gd *interactive.GeoData
@@ -1402,6 +1396,30 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 	calcStart := tStart.Add(-24 * time.Hour).UTC()
 	calcEnd := tEnd.Add(24 * time.Hour).UTC()
 
+	// 1. Годовое хранилище: сырые события в UTC. Для окна start/end берём
+	// точный диапазон, для месяца/года — диапазон расчёта с ±24 ч.
+	from, to := calcStart, calcEnd
+	window := startStr != "" && endStr != ""
+	years := []int{year}
+	if window {
+		from, to = tStart.UTC(), tEnd.UTC()
+		years = yearsBetween(from, to)
+	}
+	if events, err := calendarEventsForRange(years, from, to); err == nil {
+		formatCalendarEvents(events, loc)
+		res := &astro.AstroResult{Events: events}
+		res.ApplyFilter(parseFilterConfig(q))
+		writeCalendarResponse(w, cacheKey, res.Events, gd, tStart, ascSign)
+		return
+	}
+
+	// 2. Fallback: год ещё не в хранилище (или файл устарел) — считаем на месте.
+	release, ok := heavy.acquire(w)
+	if !ok {
+		return
+	}
+	defer release()
+
 	ephePath := GetEphePath()
 	calc := astro.NewCalculator(ephePath)
 	defer calc.Close()
@@ -1428,11 +1446,18 @@ func handleCalendar(w http.ResponseWriter, r *http.Request) {
 		res.Events = kept
 	}
 
+	writeCalendarResponse(w, cacheKey, res.Events, gd, tStart, ascSign)
+}
+
+// writeCalendarResponse собирает компактный ответ, кладёт его в кэш и отдаёт.
+// Общий для чтения из хранилища и для расчёта на месте.
+func writeCalendarResponse(w http.ResponseWriter, cacheKey string, events []astro.CalendarEvent,
+	gd *interactive.GeoData, tStart time.Time, ascSign int) {
 	var cal astro.CalendarResponse
 	if ascSign >= 0 {
-		cal = astro.NewCalendarResponseForSign(res.Events, ascSign)
+		cal = astro.NewCalendarResponseForSign(events, ascSign)
 	} else {
-		cal = astro.NewCalendarResponse(res.Events)
+		cal = astro.NewCalendarResponse(events)
 	}
 	response := CalendarAPIResponse{
 		Schema: cal.Schema,

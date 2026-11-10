@@ -38,6 +38,8 @@ func main() {
 
 	// Фоновый daily_calendar из tasks.json (пишет html/data/daily.json).
 	go startTaskRunner()
+	// Годовое хранилище календаря: текущий и следующий год, раз в сутки.
+	go startCalendarStore()
 
 	addr := Port
 	if v := os.Getenv("ASTRO_PORT"); v != "" {
