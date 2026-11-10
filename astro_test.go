@@ -270,6 +270,24 @@ func TestCacheKeyIgnoresJunkParams(t *testing.T) {
 	}
 }
 
+func TestCacheKeyCalendarRange(t *testing.T) {
+	month := url.Values{"year": {"2031"}, "month": {"3"}, "city": {"Москва"}}
+	window := url.Values{"year": {"2031"}, "month": {"3"}, "city": {"Москва"},
+		"start": {"2031-03-10"}, "end": {"2031-03-12"}}
+	if generateCacheKey("calendar", month) == generateCacheKey("calendar", window) {
+		t.Fatal("start/end должны менять ключ календаря: иначе окно отдаётся как месяц")
+	}
+	other := url.Values{"year": {"2031"}, "month": {"3"}, "city": {"Москва"},
+		"start": {"2031-03-20"}, "end": {"2031-03-22"}}
+	if generateCacheKey("calendar", window) == generateCacheKey("calendar", other) {
+		t.Fatal("разные окна должны давать разные ключи")
+	}
+	filtered := url.Values{"year": {"2031"}, "month": {"3"}, "city": {"Москва"}, "event_types": {"noC,exA"}}
+	if generateCacheKey("calendar", month) == generateCacheKey("calendar", filtered) {
+		t.Fatal("event_types должен менять ключ календаря")
+	}
+}
+
 func TestMemoryCacheLimits(t *testing.T) {
 	c := newMemoryCache(3, 100)
 	for i := 0; i < 10; i++ {

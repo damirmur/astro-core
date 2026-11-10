@@ -155,7 +155,7 @@ var cacheParams = map[string]map[string]bool{
 	"period":       setOf("start", "end", "step", "city", "houses", "max_orb", "planets", "aspects"),
 	"natal-period": setOf("date", "time", "hsys", "city", "lat", "lon", "houses", "start", "end", "step", "max_orb", "planets", "aspects"),
 	"returns":      setOf("city", "date", "time", "hsys", "lat", "lon", "ref_date", "ref_time", "ref_city", "ref_lat", "ref_lon"),
-	"calendar":     setOf("year", "month", "city", "sign", "max_orb", "planets", "aspects"),
+	"calendar":     setOf("year", "month", "city", "sign", "start", "end", "event_types", "max_orb", "planets", "aspects"),
 	"translate":    setOf("q", "tl", "sl"),
 }
 
